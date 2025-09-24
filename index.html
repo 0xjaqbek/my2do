@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moja Lista Zadań</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="stylesheet" href="styles.css">
+    <meta name="theme-color" content="#2196F3">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="My2Do">
+</head>
+<body>
+    <div id="app">
+        <!-- Nawigacja dolna -->
+        <nav class="bottom-nav">
+            <button class="nav-btn active" data-view="notes">
+                <span class="nav-icon">📝</span>
+                <span class="nav-text">Notatki</span>
+            </button>
+            <button class="nav-btn" data-view="dashboard">
+                <span class="nav-icon">📊</span>
+                <span class="nav-text">Pulpit</span>
+            </button>
+            <button class="nav-btn" data-view="completed">
+                <span class="nav-icon">✅</span>
+                <span class="nav-text">Ukończone</span>
+            </button>
+            <button class="nav-btn" data-view="settings">
+                <span class="nav-icon">⚙️</span>
+                <span class="nav-text">Ustawienia</span>
+            </button>
+        </nav>
+
+        <!-- Główny kontener widoków -->
+        <div id="views-container" class="views-container">
+            <!-- Widok Notatek -->
+            <div id="notes-view" class="view active">
+                <div class="view-header">
+                    <h1>Nowe zadanie</h1>
+                    <button id="voice-btn" class="voice-btn">🎤</button>
+                </div>
+
+                <div class="notepad-container">
+                    <textarea id="task-input" placeholder="Wpisz swoje zadanie..."></textarea>
+
+                    <div class="task-controls">
+                        <div class="control-row">
+                            <label for="task-date">Data:</label>
+                            <input type="date" id="task-date">
+                            <input type="time" id="task-time">
+                        </div>
+
+                        <div class="control-row">
+                            <label for="task-priority">Priorytet:</label>
+                            <select id="task-priority">
+                                <option value="niski">Niski</option>
+                                <option value="średni">Średni</option>
+                                <option value="wysoki">Wysoki</option>
+                            </select>
+                        </div>
+
+                        <div class="control-row">
+                            <label for="task-category">Kategoria:</label>
+                            <select id="task-category">
+                                <option value="ogólne">Ogólne</option>
+                                <option value="praca">Praca</option>
+                                <option value="dom">Dom</option>
+                                <option value="zakupy">Zakupy</option>
+                            </select>
+                        </div>
+
+                        <div class="control-row">
+                            <label for="reminder-time">Przypomnienie:</label>
+                            <select id="reminder-time">
+                                <option value="0">W czasie</option>
+                                <option value="5">5 min wcześniej</option>
+                                <option value="15">15 min wcześniej</option>
+                                <option value="30">30 min wcześniej</option>
+                                <option value="60">1 godz wcześniej</option>
+                            </select>
+                        </div>
+
+                        <div class="control-row">
+                            <label>
+                                <input type="checkbox" id="recurring-task">
+                                Zadanie cykliczne
+                            </label>
+                            <select id="recurring-type" disabled>
+                                <option value="daily">Codziennie</option>
+                                <option value="weekly">Co tydzień</option>
+                                <option value="monthly">Co miesiąc</option>
+                            </select>
+                        </div>
+
+                        <button id="add-subtask" class="subtask-btn">+ Dodaj podzadanie</button>
+                        <div id="subtasks-container"></div>
+
+                        <div class="action-buttons">
+                            <button id="save-task" class="btn-primary">Zapisz zadanie</button>
+                            <button id="clear-form" class="btn-secondary">Wyczyść</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Widok Pulpitu -->
+            <div id="dashboard-view" class="view">
+                <div class="view-header">
+                    <h1>Pulpit zadań</h1>
+                </div>
+
+                <div class="dashboard-split">
+                    <div class="dashboard-left">
+                        <h3>Zadania ogólne</h3>
+                        <div id="general-tasks" class="task-list"></div>
+                    </div>
+
+                    <div class="dashboard-divider"></div>
+
+                    <div class="dashboard-right">
+                        <h3>Harmonogram</h3>
+                        <div id="timeline-tasks" class="task-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Widok Ukończonych -->
+            <div id="completed-view" class="view">
+                <div class="view-header">
+                    <h1>Ukończone zadania</h1>
+                    <button id="clear-completed" class="btn-secondary">Wyczyść wszystkie</button>
+                </div>
+                <div id="completed-tasks" class="task-list"></div>
+            </div>
+
+            <!-- Widok Ustawień -->
+            <div id="settings-view" class="view">
+                <div class="view-header">
+                    <h1>Ustawienia</h1>
+                </div>
+
+                <div class="settings-container">
+                    <div class="settings-section">
+                        <h3>Wygląd</h3>
+                        <div class="setting-item">
+                            <label for="theme-select">Motyw:</label>
+                            <select id="theme-select">
+                                <option value="light">Jasny</option>
+                                <option value="dark">Ciemny</option>
+                            </select>
+                        </div>
+
+                        <div class="setting-item">
+                            <label for="color-scheme">Schemat kolorów:</label>
+                            <select id="color-scheme">
+                                <option value="blue">Niebieski</option>
+                                <option value="green">Zielony</option>
+                                <option value="purple">Fioletowy</option>
+                                <option value="orange">Pomarańczowy</option>
+                            </select>
+                        </div>
+
+                        <div class="setting-item">
+                            <label for="font-size">Rozmiar czcionki:</label>
+                            <input type="range" id="font-size" min="12" max="20" value="16">
+                            <span id="font-size-value">16px</span>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>Kategorie</h3>
+                        <button id="add-category" class="btn-primary">Dodaj kategorię</button>
+                        <div id="categories-list"></div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>Powiadomienia</h3>
+                        <div class="setting-item">
+                            <label>
+                                <input type="checkbox" id="enable-notifications">
+                                Włącz powiadomienia
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>Kalendarz Google</h3>
+                        <button id="connect-calendar" class="btn-primary">Połącz z kalendarzem</button>
+                        <div id="calendar-status"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal dla szczegółów zadania -->
+    <div id="task-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <div id="task-details"></div>
+        </div>
+    </div>
+
+    <!-- Modal dla dodawania kategorii -->
+    <div id="category-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h3>Dodaj kategorię</h3>
+            <input type="text" id="new-category-name" placeholder="Nazwa kategorii">
+            <input type="color" id="new-category-color" value="#2196F3">
+            <div class="modal-actions">
+                <button id="save-category" class="btn-primary">Zapisz</button>
+                <button class="btn-secondary cancel-modal">Anuluj</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
