@@ -67,18 +67,7 @@ class My2DoApp {
 
         return new Promise((resolve, reject) => {
             console.log('Initializing database...');
-
-            // Clear any existing broken databases
-            const deleteReq = indexedDB.deleteDatabase('My2DoDatabase');
-            deleteReq.onsuccess = () => {
-                console.log('Old database cleared');
-                this.openDatabase(resolve, reject);
-            };
-
-            deleteReq.onerror = () => {
-                console.log('No old database to clear, opening new one');
-                this.openDatabase(resolve, reject);
-            };
+            this.openDatabase(resolve, reject);
         });
     }
 
@@ -87,9 +76,8 @@ class My2DoApp {
 
         request.onerror = () => {
             console.error('Database error:', request.error);
-            console.warn('Falling back to localStorage');
-            this.useLocalStorageFallback = true;
-            resolve();
+            console.warn('Attempting to clear corrupted database and retry...');
+            this.clearCorruptedDatabase(resolve, reject);
         };
 
         request.onblocked = () => {
@@ -118,32 +106,72 @@ class My2DoApp {
             const db = event.target.result;
 
             try {
-                // Store dla zadań
-                if (!db.objectStoreNames.contains('tasks')) {
-                    console.log('Creating tasks store');
-                    const taskStore = db.createObjectStore('tasks', { keyPath: 'id' });
-                    taskStore.createIndex('completed', 'completed', { unique: false });
-                    taskStore.createIndex('dueDate', 'dueDate', { unique: false });
-                    taskStore.createIndex('priority', 'priority', { unique: false });
-                    taskStore.createIndex('category', 'category', { unique: false });
-                }
-
-                // Store dla kategorii
-                if (!db.objectStoreNames.contains('categories')) {
-                    console.log('Creating categories store');
-                    db.createObjectStore('categories', { keyPath: 'id' });
-                }
-
-                // Store dla ustawień
-                if (!db.objectStoreNames.contains('settings')) {
-                    console.log('Creating settings store');
-                    db.createObjectStore('settings', { keyPath: 'key' });
-                }
+                this.setupDatabaseSchema(db);
             } catch (error) {
                 console.error('Error creating database schema:', error);
                 this.useLocalStorageFallback = true;
             }
         };
+    }
+
+    clearCorruptedDatabase(resolve, reject) {
+        console.log('Clearing corrupted database...');
+        const deleteReq = indexedDB.deleteDatabase('My2DoDatabase');
+
+        deleteReq.onsuccess = () => {
+            console.log('Corrupted database cleared, retrying...');
+            // Try to open database again after clearing
+            const retryRequest = indexedDB.open('My2DoDatabase', 1);
+
+            retryRequest.onsuccess = () => {
+                this.db = retryRequest.result;
+                this.useLocalStorageFallback = false;
+                console.log('Database reopened successfully after clearing');
+                resolve();
+            };
+
+            retryRequest.onerror = () => {
+                console.error('Still cannot open database after clearing, using localStorage');
+                this.useLocalStorageFallback = true;
+                resolve();
+            };
+
+            retryRequest.onupgradeneeded = (event) => {
+                this.setupDatabaseSchema(event.target.result);
+            };
+        };
+
+        deleteReq.onerror = () => {
+            console.error('Cannot clear database, falling back to localStorage');
+            this.useLocalStorageFallback = true;
+            resolve();
+        };
+    }
+
+    setupDatabaseSchema(db) {
+        try {
+            if (!db.objectStoreNames.contains('tasks')) {
+                console.log('Creating tasks store');
+                const taskStore = db.createObjectStore('tasks', { keyPath: 'id' });
+                taskStore.createIndex('completed', 'completed', { unique: false });
+                taskStore.createIndex('dueDate', 'dueDate', { unique: false });
+                taskStore.createIndex('priority', 'priority', { unique: false });
+                taskStore.createIndex('category', 'category', { unique: false });
+            }
+
+            if (!db.objectStoreNames.contains('categories')) {
+                console.log('Creating categories store');
+                db.createObjectStore('categories', { keyPath: 'id' });
+            }
+
+            if (!db.objectStoreNames.contains('settings')) {
+                console.log('Creating settings store');
+                db.createObjectStore('settings', { keyPath: 'key' });
+            }
+        } catch (error) {
+            console.error('Error creating database schema:', error);
+            throw error;
+        }
     }
 
     async saveToStore(storeName, data) {
@@ -282,7 +310,10 @@ class My2DoApp {
     // === ZADANIA ===
     async loadTasks() {
         try {
-            this.tasks = await this.getFromStore('tasks');
+            console.log('Loading tasks from storage...');
+            const loadedTasks = await this.getFromStore('tasks');
+            this.tasks = loadedTasks || [];
+            console.log('Loaded tasks:', this.tasks.length, 'tasks');
         } catch (error) {
             console.error('Błąd ładowania zadań:', error);
             this.tasks = [];
