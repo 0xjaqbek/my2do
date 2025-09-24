@@ -51,14 +51,14 @@ class My2DoSimple {
 
             console.log('💾 Data saved successfully:', debugInfo);
 
-            // Auto-backup every 5 saves for mobile reliability
+            // Track saves for statistics (no auto-download)
             const saveCount = parseInt(localStorage.getItem('saveCount') || '0') + 1;
             localStorage.setItem('saveCount', saveCount.toString());
 
-            if (saveCount % 5 === 0) {
-                console.log('📁 Creating auto-backup (save #' + saveCount + ')');
-                // Auto-backup: not user-initiated
-                this.downloadBackup(false);
+            // Log save count but don't auto-download
+            if (saveCount % 10 === 0) {
+                console.log('📊 Save milestone reached:', saveCount, 'saves');
+                console.log('💡 Tip: Use manual backup in Settings → "Pobierz kopię zapasową"');
             }
 
             return true;
@@ -712,14 +712,17 @@ class My2DoSimple {
             const isMobile = this.isMobile();
             backupSection.innerHTML = `
                 <h3>Backup danych</h3>
+                <p style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
+                    💡 Kopie zapasowe tworzone są tylko ręcznie - nie ma automatycznych pobrań
+                </p>
                 <button id="download-backup" class="btn-primary">
-                    ${isMobile ? '📋 Skopiuj dane' : 'Pobierz kopię zapasową'}
+                    ${isMobile ? '📋 Skopiuj dane' : '📥 Pobierz kopię zapasową'}
                 </button>
                 ${isMobile ? '<p style="font-size:12px; color:var(--text-secondary); margin:5px 0;">Na urządzeniach mobilnych dane zostaną skopiowane do schowka</p>' : ''}
                 <input type="file" id="import-backup" accept=".json" style="display: none;">
-                <button id="import-backup-btn" class="btn-secondary">Importuj kopię zapasową</button>
-                <button id="migrate-old-data" class="btn-secondary">Migruj stare dane</button>
-                <button id="cleanup-old-data" class="btn-secondary">Wyczyść stare dane</button>
+                <button id="import-backup-btn" class="btn-secondary">📤 Importuj kopię zapasową</button>
+                <button id="migrate-old-data" class="btn-secondary">🔄 Migruj stare dane</button>
+                <button id="cleanup-old-data" class="btn-secondary">🗑️ Wyczyść stare dane</button>
             `;
             settingsContainer.appendChild(backupSection);
 
