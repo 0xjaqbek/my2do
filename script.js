@@ -38,8 +38,16 @@ class My2DoApp {
 
         // Rejestracja service workera
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js');
+            try {
+                const registration = await navigator.serviceWorker.register('./sw.js');
+                console.log('Service Worker registered:', registration);
+            } catch (error) {
+                console.log('Service Worker registration failed:', error);
+            }
         }
+
+        // PWA Install prompt
+        this.initPWAInstall();
 
         // Żądanie uprawnień do powiadomień
         if ('Notification' in window) {
@@ -318,6 +326,62 @@ class My2DoApp {
                 }
             }, delay);
         }
+    }
+
+    // === PWA INSTALL ===
+    initPWAInstall() {
+        let deferredPrompt;
+
+        // Listen for beforeinstallprompt event
+        window.addEventListener('beforeinstallprompt', (e) => {
+            console.log('PWA install prompt available');
+            e.preventDefault();
+            deferredPrompt = e;
+
+            // Show install button or notification
+            this.showInstallPrompt();
+        });
+
+        // Listen for app installed
+        window.addEventListener('appinstalled', () => {
+            console.log('PWA was installed');
+            deferredPrompt = null;
+        });
+
+        // Check if already installed
+        window.addEventListener('DOMContentLoaded', () => {
+            if (window.matchMedia('(display-mode: standalone)').matches) {
+                console.log('PWA is running in standalone mode');
+            }
+        });
+    }
+
+    showInstallPrompt() {
+        // You can add a custom install button here
+        console.log('PWA can be installed');
+
+        // For debugging - show alert
+        if (window.location.hostname !== 'localhost') {
+            setTimeout(() => {
+                if (confirm('Czy chcesz zainstalować My2Do jako aplikację?')) {
+                    this.installPWA();
+                }
+            }, 3000);
+        }
+    }
+
+    async installPWA() {
+        const deferredPrompt = window.deferredPrompt;
+        if (!deferredPrompt) return;
+
+        // Show the install prompt
+        deferredPrompt.prompt();
+
+        // Wait for the user to respond to the prompt
+        const { outcome } = await deferredPrompt.userChoice;
+
+        console.log(`User response to the install prompt: ${outcome}`);
+        window.deferredPrompt = null;
     }
 
     // === ROZPOZNAWANIE MOWY ===

@@ -38,13 +38,14 @@ copy styles.css %BUILD_DIR%\ >nul
 copy script.js %BUILD_DIR%\ >nul
 copy manifest.json %BUILD_DIR%\ >nul
 copy sw.js %BUILD_DIR%\ >nul
-copy create-simple-icons.html %BUILD_DIR%\ >nul
 
-REM Copy icons directory if it exists
+REM Copy icons directory
 if exist icons\ (
     xcopy icons\ %BUILD_DIR%\icons\ /E /I /Q >nul
+    echo ✅ PWA icons copied successfully
 ) else (
-    echo ⚠️  Icons directory not found - generate icons first!
+    echo ❌ Error: Icons directory not found!
+    exit /b 1
 )
 
 echo 📄 Creating 404.html for GitHub Pages...

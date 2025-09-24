@@ -39,15 +39,16 @@ jobs:
           cp script.js build/
           cp manifest.json build/
           cp sw.js build/
-          cp create-simple-icons.html build/
 
-      - name: Copy icons if they exist
+      - name: Copy PWA icons
         run: |
           if [ -d "icons" ]; then
             cp -r icons/ build/
+            echo "✅ PWA icons copied successfully"
           else
-            echo "Icons directory not found - will be generated on first visit"
-            mkdir -p build/icons
+            echo "❌ Error: Icons directory not found!"
+            echo "Please add PWA icons to the icons/ directory"
+            exit 1
           fi
 
       - name: Create 404.html for GitHub Pages SPA

@@ -84,10 +84,8 @@ git clone https://github.com/yourusername/my2do.git
 cd my2do
 ```
 
-#### 2. Wygeneruj ikony PWA
-Otwórz w przeglądarce: `create-simple-icons.html`
-- Kliknij "Generuj ikony"
-- Zapisz każdą ikonę w folderze `icons/` jako `icon-[rozmiar]x[rozmiar].png`
+#### 2. Ikony PWA ✅
+**Ikony PWA są już dołączone!** Aplikacja jest gotowa do zainstalowania jako pełna PWA.
 
 #### 3. Uruchom serwer
 ```bash
@@ -109,9 +107,18 @@ http://localhost:8000
 ```
 
 ### 📱 Instalacja jako PWA
-- **Android/Chrome**: Menu → "Zainstaluj aplikację" lub "Dodaj do ekranu głównego"
+
+**⚠️ Jeśli aplikacja instaluje się jako "skrót" zamiast aplikacji - brakuje ikon PWA!**
+
+**Prawidłowa instalacja:**
+- **Android/Chrome**: Menu → "Zainstaluj My2Do" (ikona aplikacji w menu)
 - **iOS/Safari**: Udostępnij → "Dodaj do ekranu głównego"
-- **Desktop**: Ikona instalacji w pasku adresu przeglądarki
+- **Desktop**: Ikona instalacji ⊕ w pasku adresu przeglądarki
+
+**Rozwiązywanie problemów:**
+1. **Brak opcji instalacji** = Sprawdź czy ikony PWA są w folderze `icons/` (powinny być)
+2. **Instaluje się jako skrót** = Wyczyść cache przeglądarki i spróbuj ponownie
+3. **Nie działa offline** = Sprawdź czy Service Worker się zarejestrował (F12 → Application → Service Workers)
 
 ## Konfiguracja Google Calendar (opcjonalna)
 

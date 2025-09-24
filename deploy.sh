@@ -35,10 +35,14 @@ cp styles.css $BUILD_DIR/
 cp script.js $BUILD_DIR/
 cp manifest.json $BUILD_DIR/
 cp sw.js $BUILD_DIR/
-cp -r icons/ $BUILD_DIR/ 2>/dev/null || echo "⚠️  Icons directory not found - generate icons first!"
+if [ -d "icons" ]; then
+    cp -r icons/ $BUILD_DIR/
+    echo "✅ PWA icons copied successfully"
+else
+    echo "❌ Error: Icons directory not found!"
+    exit 1
+fi
 
-# Copy the icon generator (useful for users who want to regenerate icons)
-cp create-simple-icons.html $BUILD_DIR/
 
 # Create a 404.html for SPA routing (if needed)
 echo "📄 Creating 404.html for GitHub Pages..."
