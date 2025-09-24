@@ -56,10 +56,8 @@ class My2DoSimple {
 
             if (saveCount % 5 === 0) {
                 console.log('📁 Creating auto-backup (save #' + saveCount + ')');
-                // Don't auto-download on mobile to avoid interrupting UX
-                if (!this.isMobile()) {
-                    this.downloadBackup();
-                }
+                // Auto-backup: not user-initiated
+                this.downloadBackup(false);
             }
 
             return true;
@@ -204,20 +202,89 @@ class My2DoSimple {
         console.log(`🧹 Cleaned up ${keysToRemove.length} old storage keys`);
     }
 
-    downloadBackup() {
+    downloadBackup(userInitiated = false) {
         const dataString = JSON.stringify(this.data, null, 2);
-        const blob = new Blob([dataString], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
 
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `my2do-backup-${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        // On mobile, only allow user-initiated downloads
+        if (this.isMobile() && !userInitiated) {
+            console.log('📱 Skipping auto-download on mobile - user must initiate');
+            return false;
+        }
 
-        URL.revokeObjectURL(url);
-        console.log('💾 Backup file downloaded');
+        try {
+            const blob = new Blob([dataString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `my2do-backup-${new Date().toISOString().split('T')[0]}.json`;
+
+            // Mobile-specific handling
+            if (this.isMobile()) {
+                // On mobile, add additional attributes for better compatibility
+                link.setAttribute('target', '_blank');
+                link.setAttribute('rel', 'noopener');
+
+                // Add a slight delay to ensure user gesture is preserved
+                setTimeout(() => {
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            } else {
+                // Desktop handling
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            }
+
+            console.log('💾 Backup file downloaded');
+            return true;
+        } catch (error) {
+            console.error('❌ Error downloading backup:', error);
+
+            // Fallback for mobile: copy to clipboard
+            if (this.isMobile()) {
+                this.copyDataToClipboard(dataString);
+            }
+            return false;
+        }
+    }
+
+    copyDataToClipboard(dataString) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(dataString).then(() => {
+                alert('📋 Dane zostały skopiowane do schowka!\n\nWklej je do pliku tekstowego, aby zapisać kopię zapasową.');
+                console.log('📋 Data copied to clipboard as fallback');
+            }).catch(err => {
+                console.error('❌ Failed to copy to clipboard:', err);
+                this.showDataModal(dataString);
+            });
+        } else {
+            // Fallback: show data in modal for manual copy
+            this.showDataModal(dataString);
+        }
+    }
+
+    showDataModal(dataString) {
+        const modal = document.createElement('div');
+        modal.className = 'modal show';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <span class="close" onclick="this.parentElement.parentElement.remove()">&times;</span>
+                <h3>Kopia zapasowa danych</h3>
+                <p>Skopiuj poniższe dane i zapisz je w pliku .json:</p>
+                <textarea readonly style="width:100%; height:200px; font-family:monospace; font-size:12px;">${dataString}</textarea>
+                <div class="modal-actions">
+                    <button class="btn-primary" onclick="navigator.clipboard.writeText(\`${dataString.replace(/`/g, '\\`')}\`).then(() => alert('Skopiowano!')).catch(() => alert('Zaznacz i skopiuj ręcznie'))">Skopiuj</button>
+                    <button class="btn-secondary" onclick="this.parentElement.parentElement.parentElement.remove()">Zamknij</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        console.log('📄 Data shown in modal for manual copy');
     }
 
     importBackup(file) {
@@ -559,9 +626,13 @@ class My2DoSimple {
             const backupSection = document.createElement('div');
             backupSection.id = 'backup-section';
             backupSection.className = 'settings-section';
+            const isMobile = this.isMobile();
             backupSection.innerHTML = `
                 <h3>Backup danych</h3>
-                <button id="download-backup" class="btn-primary">Pobierz kopię zapasową</button>
+                <button id="download-backup" class="btn-primary">
+                    ${isMobile ? '📋 Skopiuj dane' : 'Pobierz kopię zapasową'}
+                </button>
+                ${isMobile ? '<p style="font-size:12px; color:var(--text-secondary); margin:5px 0;">Na urządzeniach mobilnych dane zostaną skopiowane do schowka</p>' : ''}
                 <input type="file" id="import-backup" accept=".json" style="display: none;">
                 <button id="import-backup-btn" class="btn-secondary">Importuj kopię zapasową</button>
                 <button id="migrate-old-data" class="btn-secondary">Migruj stare dane</button>
@@ -570,7 +641,8 @@ class My2DoSimple {
             settingsContainer.appendChild(backupSection);
 
             document.getElementById('download-backup').addEventListener('click', () => {
-                this.downloadBackup();
+                // Manual download: user-initiated
+                this.downloadBackup(true);
             });
 
             document.getElementById('import-backup-btn').addEventListener('click', () => {
