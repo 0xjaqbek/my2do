@@ -19,6 +19,7 @@ class My2DoApp {
 
         this.recognition = null;
         this.isRecording = false;
+        this.useLocalStorageFallback = false;
 
         this.init();
     }
@@ -57,20 +58,69 @@ class My2DoApp {
 
     // === BAZA DANYCH ===
     async initDB() {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open('My2DoDatabase', 1);
+        // Check if IndexedDB is available
+        if (!window.indexedDB) {
+            console.warn('IndexedDB not supported, using localStorage fallback');
+            this.useLocalStorageFallback = true;
+            return;
+        }
 
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => {
-                this.db = request.result;
-                resolve();
+        return new Promise((resolve, reject) => {
+            console.log('Initializing database...');
+
+            // Clear any existing broken databases
+            const deleteReq = indexedDB.deleteDatabase('My2DoDatabase');
+            deleteReq.onsuccess = () => {
+                console.log('Old database cleared');
+                this.openDatabase(resolve, reject);
             };
 
-            request.onupgradeneeded = (event) => {
-                const db = event.target.result;
+            deleteReq.onerror = () => {
+                console.log('No old database to clear, opening new one');
+                this.openDatabase(resolve, reject);
+            };
+        });
+    }
 
+    openDatabase(resolve, reject) {
+        const request = indexedDB.open('My2DoDatabase', 1);
+
+        request.onerror = () => {
+            console.error('Database error:', request.error);
+            console.warn('Falling back to localStorage');
+            this.useLocalStorageFallback = true;
+            resolve();
+        };
+
+        request.onblocked = () => {
+            console.warn('Database blocked, falling back to localStorage');
+            this.useLocalStorageFallback = true;
+            resolve();
+        };
+
+        request.onsuccess = () => {
+            this.db = request.result;
+            this.useLocalStorageFallback = false;
+            console.log('Database opened successfully');
+
+            // Handle version change while app is open
+            this.db.onversionchange = () => {
+                this.db.close();
+                console.log('Database version changed, reloading...');
+                window.location.reload();
+            };
+
+            resolve();
+        };
+
+        request.onupgradeneeded = (event) => {
+            console.log('Database upgrade needed');
+            const db = event.target.result;
+
+            try {
                 // Store dla zadań
                 if (!db.objectStoreNames.contains('tasks')) {
+                    console.log('Creating tasks store');
                     const taskStore = db.createObjectStore('tasks', { keyPath: 'id' });
                     taskStore.createIndex('completed', 'completed', { unique: false });
                     taskStore.createIndex('dueDate', 'dueDate', { unique: false });
@@ -80,38 +130,153 @@ class My2DoApp {
 
                 // Store dla kategorii
                 if (!db.objectStoreNames.contains('categories')) {
-                    const categoryStore = db.createObjectStore('categories', { keyPath: 'id' });
+                    console.log('Creating categories store');
+                    db.createObjectStore('categories', { keyPath: 'id' });
                 }
 
                 // Store dla ustawień
                 if (!db.objectStoreNames.contains('settings')) {
+                    console.log('Creating settings store');
                     db.createObjectStore('settings', { keyPath: 'key' });
                 }
-            };
-        });
+            } catch (error) {
+                console.error('Error creating database schema:', error);
+                this.useLocalStorageFallback = true;
+            }
+        };
     }
 
     async saveToStore(storeName, data) {
-        const tx = this.db.transaction([storeName], 'readwrite');
-        const store = tx.objectStore(storeName);
-        await store.put(data);
+        if (this.useLocalStorageFallback) {
+            return this.saveToLocalStorage(storeName, data);
+        }
+
+        return new Promise((resolve, reject) => {
+            try {
+                const tx = this.db.transaction([storeName], 'readwrite');
+                const store = tx.objectStore(storeName);
+                const request = store.put(data);
+
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            } catch (error) {
+                console.warn('IndexedDB error, falling back to localStorage:', error);
+                this.useLocalStorageFallback = true;
+                resolve(this.saveToLocalStorage(storeName, data));
+            }
+        });
+    }
+
+    saveToLocalStorage(storeName, data) {
+        try {
+            const key = `${storeName}_${data.id || data.key}`;
+            localStorage.setItem(key, JSON.stringify(data));
+
+            // Also maintain a list of items for each store
+            const listKey = `${storeName}_list`;
+            const existingList = JSON.parse(localStorage.getItem(listKey) || '[]');
+            const itemId = data.id || data.key;
+
+            if (!existingList.includes(itemId)) {
+                existingList.push(itemId);
+                localStorage.setItem(listKey, JSON.stringify(existingList));
+            }
+
+            return data;
+        } catch (error) {
+            console.error('localStorage error:', error);
+            throw error;
+        }
     }
 
     async getFromStore(storeName, key = null) {
-        const tx = this.db.transaction([storeName], 'readonly');
-        const store = tx.objectStore(storeName);
+        if (this.useLocalStorageFallback) {
+            return this.getFromLocalStorage(storeName, key);
+        }
 
-        if (key) {
-            return await store.get(key);
-        } else {
-            return await store.getAll();
+        return new Promise((resolve, reject) => {
+            try {
+                const tx = this.db.transaction([storeName], 'readonly');
+                const store = tx.objectStore(storeName);
+
+                let request;
+                if (key) {
+                    request = store.get(key);
+                } else {
+                    request = store.getAll();
+                }
+
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            } catch (error) {
+                console.warn('IndexedDB error, falling back to localStorage:', error);
+                this.useLocalStorageFallback = true;
+                resolve(this.getFromLocalStorage(storeName, key));
+            }
+        });
+    }
+
+    getFromLocalStorage(storeName, key = null) {
+        try {
+            if (key) {
+                const item = localStorage.getItem(`${storeName}_${key}`);
+                return item ? JSON.parse(item) : null;
+            } else {
+                const listKey = `${storeName}_list`;
+                const itemIds = JSON.parse(localStorage.getItem(listKey) || '[]');
+                const items = [];
+
+                for (const itemId of itemIds) {
+                    const item = localStorage.getItem(`${storeName}_${itemId}`);
+                    if (item) {
+                        items.push(JSON.parse(item));
+                    }
+                }
+
+                return items;
+            }
+        } catch (error) {
+            console.error('localStorage error:', error);
+            return key ? null : [];
         }
     }
 
     async deleteFromStore(storeName, key) {
-        const tx = this.db.transaction([storeName], 'readwrite');
-        const store = tx.objectStore(storeName);
-        await store.delete(key);
+        if (this.useLocalStorageFallback) {
+            return this.deleteFromLocalStorage(storeName, key);
+        }
+
+        return new Promise((resolve, reject) => {
+            try {
+                const tx = this.db.transaction([storeName], 'readwrite');
+                const store = tx.objectStore(storeName);
+                const request = store.delete(key);
+
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            } catch (error) {
+                console.warn('IndexedDB error, falling back to localStorage:', error);
+                this.useLocalStorageFallback = true;
+                resolve(this.deleteFromLocalStorage(storeName, key));
+            }
+        });
+    }
+
+    deleteFromLocalStorage(storeName, key) {
+        try {
+            localStorage.removeItem(`${storeName}_${key}`);
+
+            // Remove from list
+            const listKey = `${storeName}_list`;
+            const existingList = JSON.parse(localStorage.getItem(listKey) || '[]');
+            const updatedList = existingList.filter(id => id !== key);
+            localStorage.setItem(listKey, JSON.stringify(updatedList));
+
+            return true;
+        } catch (error) {
+            console.error('localStorage error:', error);
+            throw error;
+        }
     }
 
     // === ZADANIA ===
@@ -125,6 +290,8 @@ class My2DoApp {
     }
 
     async saveTask(taskData) {
+        console.log('Saving task:', taskData);
+
         const task = {
             id: Date.now().toString(),
             title: taskData.title,
@@ -147,11 +314,23 @@ class My2DoApp {
             task.reminder = new Date(dueDateTime.getTime() - (task.reminderOffset * 60000)).toISOString();
         }
 
-        await this.saveToStore('tasks', task);
-        this.tasks.push(task);
+        console.log('Created task object:', task);
 
-        this.renderDashboard();
-        this.scheduleNotification(task);
+        try {
+            await this.saveToStore('tasks', task);
+            console.log('Task saved to database');
+
+            this.tasks.push(task);
+            console.log('Task added to array, total tasks:', this.tasks.length);
+
+            this.renderDashboard();
+            console.log('Dashboard rendered');
+
+            this.scheduleNotification(task);
+        } catch (error) {
+            console.error('Error saving task:', error);
+            alert('Błąd zapisywania zadania: ' + error.message);
+        }
 
         return task;
     }
@@ -673,23 +852,40 @@ class My2DoApp {
     }
 
     renderDashboard() {
+        console.log('Rendering dashboard, total tasks:', this.tasks.length);
+
         const activeTasks = this.tasks.filter(t => !t.completed);
+        console.log('Active tasks:', activeTasks.length);
+
         const generalTasks = activeTasks.filter(t => !t.dueDate || !t.dueTime);
         const timelineTasks = activeTasks.filter(t => t.dueDate && t.dueTime)
             .sort((a, b) => new Date(`${a.dueDate}T${a.dueTime}`) - new Date(`${b.dueDate}T${b.dueTime}`));
+
+        console.log('General tasks:', generalTasks.length);
+        console.log('Timeline tasks:', timelineTasks.length);
 
         this.renderTaskList('general-tasks', generalTasks);
         this.renderTaskList('timeline-tasks', timelineTasks);
     }
 
     renderTaskList(containerId, tasks) {
+        console.log(`Rendering task list for ${containerId}, ${tasks.length} tasks`);
+
         const container = document.getElementById(containerId);
+        if (!container) {
+            console.error(`Container ${containerId} not found!`);
+            return;
+        }
+
         container.innerHTML = '';
 
         for (const task of tasks) {
+            console.log(`Rendering task: ${task.title}`);
             const taskElement = this.createTaskElement(task);
             container.appendChild(taskElement);
         }
+
+        console.log(`Finished rendering ${containerId}`);
     }
 
     createTaskElement(task) {
