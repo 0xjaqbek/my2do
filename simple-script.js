@@ -461,6 +461,31 @@ class My2DoSimple {
         const category = this.data.categories.find(c => c.id === task.category) || this.data.categories[0];
         const dueDateText = task.dueDate ? new Date(task.dueDate).toLocaleDateString('pl-PL') : '';
 
+        // Check if task has upcoming reminder
+        const hasUpcomingReminder = task.reminderTime && !task.reminderSent && !isCompleted;
+        const now = new Date();
+        let reminderStatus = '';
+
+        if (hasUpcomingReminder) {
+            const reminderTime = new Date(task.reminderTime);
+            const timeDiff = reminderTime.getTime() - now.getTime();
+            const minutesUntil = Math.round(timeDiff / 1000 / 60);
+
+            if (timeDiff > 0) {
+                reminderStatus = `
+                    <div class="reminder-status" style="margin-top: 8px; padding: 4px 8px; background: var(--warning-color); color: white; border-radius: 4px; font-size: 11px;">
+                        ⏰ Przypomnienie za ${minutesUntil} min
+                    </div>
+                `;
+            } else if (timeDiff > -300000) { // Within 5 minutes past
+                reminderStatus = `
+                    <div class="reminder-status overdue" style="margin-top: 8px; padding: 4px 8px; background: var(--error-color); color: white; border-radius: 4px; font-size: 11px;">
+                        🚨 Przypomnienie przeterminowane
+                    </div>
+                `;
+            }
+        }
+
         div.innerHTML = `
             <div class="task-priority ${task.priority}"></div>
             <div class="task-title">${task.title}</div>
@@ -471,7 +496,21 @@ class My2DoSimple {
                 </span>
                 ${dueDateText ? `<span>${dueDateText} ${task.dueTime || ''}</span>` : ''}
             </div>
+            ${reminderStatus}
         `;
+
+        // Add notification acknowledgment button for tasks with upcoming/overdue reminders
+        if (hasUpcomingReminder) {
+            const ackButton = document.createElement('button');
+            ackButton.textContent = '🔔 Przyjmij powiadomienie';
+            ackButton.className = 'btn-secondary';
+            ackButton.style.cssText = 'margin-top: 8px; padding: 4px 8px; font-size: 11px; width: 100%;';
+            ackButton.onclick = (e) => {
+                e.stopPropagation(); // Prevent task details modal
+                this.acknowledgeNotification(task);
+            };
+            div.appendChild(ackButton);
+        }
 
         div.addEventListener('click', () => {
             this.showTaskDetails(task, isCompleted);
@@ -1265,6 +1304,109 @@ class My2DoSimple {
         // Insert after the notification setting
         const notificationSetting = document.getElementById('enable-notifications').closest('.setting-item');
         notificationSetting.parentNode.insertBefore(statusDiv, notificationSetting.nextSibling);
+
+        // Add test notification button if permissions are granted
+        if (permission === 'granted') {
+            const testButton = document.createElement('button');
+            testButton.textContent = '🔔 Test powiadomienia';
+            testButton.className = 'btn-secondary';
+            testButton.style.cssText = 'margin-top: 10px; width: 100%;';
+            testButton.onclick = () => this.testNotification();
+
+            statusDiv.parentNode.insertBefore(testButton, statusDiv.nextSibling);
+        }
+    }
+
+    testNotification() {
+        console.log('🔔 Testing notification manually...');
+
+        const isMobilePWA = this.isMobile() && window.matchMedia('(display-mode: standalone)').matches;
+        const testTime = new Date().toLocaleString();
+
+        if (isMobilePWA) {
+            console.log('📱 Testing mobile PWA notification...');
+
+            // Try both Service Worker and direct notification
+            if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                console.log('📨 Sending test notification via Service Worker...');
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'SHOW_TEST_NOTIFICATION',
+                    title: 'Test Powiadomienia',
+                    body: `Testowe powiadomienie z PWA (${testTime})`,
+                    tag: 'test-notification'
+                });
+            }
+
+            // Also try direct notification as fallback
+            setTimeout(() => {
+                this.showDirectNotification('Test Powiadomienia (Direct)', `Bezpośrednie powiadomienie z PWA (${testTime})`);
+            }, 1000);
+
+        } else {
+            console.log('🖥️ Testing desktop notification...');
+            this.showDirectNotification('Test Powiadomienia', `Testowe powiadomienie z przeglądarki (${testTime})`);
+        }
+    }
+
+    showDirectNotification(title, body) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            try {
+                const notification = new Notification(title, {
+                    body: body,
+                    icon: './icons/icon-192x192.png',
+                    tag: 'test-notification',
+                    requireInteraction: true,
+                    vibrate: [200, 100, 200]
+                });
+
+                notification.onclick = () => {
+                    console.log('📱 Test notification clicked');
+                    window.focus();
+                    notification.close();
+                };
+
+                console.log('✅ Direct notification created successfully');
+
+                // Auto-close after 10 seconds for testing
+                setTimeout(() => {
+                    notification.close();
+                }, 10000);
+
+            } catch (error) {
+                console.error('❌ Error showing direct notification:', error);
+                alert('Błąd powiadomienia: ' + error.message);
+            }
+        } else {
+            console.warn('⚠️ Cannot show notification - permission not granted');
+            alert('Powiadomienia nie są dostępne. Sprawdź uprawnienia w przeglądarce.');
+        }
+    }
+
+    acknowledgeNotification(task) {
+        console.log('✅ User acknowledged notification for task:', task.title);
+
+        // Show immediate test notification to verify it works
+        const testTitle = `Potwierdzenie: ${task.title}`;
+        const testBody = `Użytkownik potwierdził powiadomienie o godzinie ${new Date().toLocaleString()}`;
+
+        // Force show notification immediately for testing
+        this.showDirectNotification(testTitle, testBody);
+
+        // Mark as sent to prevent further reminders
+        this.markReminderSent(task.id);
+
+        // Update dashboard to remove the button
+        this.renderDashboard();
+
+        // Log detailed info for debugging
+        console.log('🔔 Notification acknowledged:', {
+            taskId: task.id,
+            taskTitle: task.title,
+            reminderTime: task.reminderTime,
+            timeNow: new Date().toISOString(),
+            isPWA: window.matchMedia('(display-mode: standalone)').matches,
+            isMobile: this.isMobile()
+        });
     }
 }
 

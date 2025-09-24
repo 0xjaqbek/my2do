@@ -70,6 +70,30 @@ self.addEventListener('message', event => {
     console.log('🏓 SW received PING - responding...');
     event.ports[0]?.postMessage({ type: 'PONG' });
   }
+
+  if (event.data && event.data.type === 'SHOW_TEST_NOTIFICATION') {
+    console.log('🔔 SW showing test notification...');
+
+    self.registration.showNotification(event.data.title, {
+      body: event.data.body,
+      icon: './icons/icon-192x192.png',
+      badge: './icons/icon-72x72.png',
+      tag: event.data.tag || 'test-notification',
+      requireInteraction: true,
+      vibrate: [200, 100, 200],
+      timestamp: Date.now(),
+      actions: [
+        {
+          action: 'dismiss',
+          title: '❌ Zamknij'
+        }
+      ]
+    }).then(() => {
+      console.log('✅ SW test notification shown successfully');
+    }).catch(error => {
+      console.error('❌ SW failed to show test notification:', error);
+    });
+  }
 });
 
 function checkAndSendReminders(tasks) {
