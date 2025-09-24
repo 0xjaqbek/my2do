@@ -57,11 +57,18 @@ self.addEventListener('notificationclick', event => {
   );
 });
 
-// Listen for messages from main thread to check reminders
+// Listen for messages from main thread
 self.addEventListener('message', event => {
+  console.log('📨 SW received message:', event.data.type);
+
   if (event.data && event.data.type === 'CHECK_REMINDERS') {
-    console.log('📨 Received CHECK_REMINDERS message');
+    console.log('📨 Received CHECK_REMINDERS message with', event.data.tasks.length, 'tasks');
     checkAndSendReminders(event.data.tasks);
+  }
+
+  if (event.data && event.data.type === 'PING') {
+    console.log('🏓 SW received PING - responding...');
+    event.ports[0]?.postMessage({ type: 'PONG' });
   }
 });
 

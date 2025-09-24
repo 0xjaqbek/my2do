@@ -513,6 +513,9 @@ class My2DoSimple {
         document.getElementById('font-size-value').textContent = this.data.settings.fontSize + 'px';
         document.getElementById('enable-notifications').checked = this.data.settings.notificationsEnabled;
 
+        // Add mobile PWA notification status
+        this.updateNotificationStatus();
+
         // Render categories
         const categoriesList = document.getElementById('categories-list');
         categoriesList.innerHTML = '';
@@ -612,6 +615,11 @@ class My2DoSimple {
                     if (permission === 'granted') {
                         this.startNotificationChecking();
                         console.log('✅ Notifications enabled and checking started');
+
+                        // Mobile PWA: Also setup enhanced mobile handling
+                        if (this.isMobile() && window.matchMedia('(display-mode: standalone)').matches) {
+                            this.setupMobilePWANotifications();
+                        }
                     } else {
                         console.warn('⚠️ Notification permission denied');
                         e.target.checked = false;
@@ -623,6 +631,9 @@ class My2DoSimple {
                 this.stopNotificationChecking();
                 console.log('🔕 Notifications disabled and checking stopped');
             }
+
+            // Update status indicator
+            this.updateNotificationStatus();
         });
 
         // Categories
@@ -958,7 +969,12 @@ class My2DoSimple {
 
     // === NOTIFICATION SYSTEM ===
     async setupNotifications() {
-        console.log('🔔 Setting up notification system...');
+        console.log('🔔 Setting up notification system...', {
+            isPWA: window.matchMedia('(display-mode: standalone)').matches,
+            isMobile: this.isMobile(),
+            hasNotificationAPI: 'Notification' in window,
+            hasServiceWorker: 'serviceWorker' in navigator
+        });
 
         // Request notification permissions
         if ('Notification' in window) {
@@ -967,6 +983,11 @@ class My2DoSimple {
 
             if (permission === 'granted') {
                 this.startNotificationChecking();
+
+                // Mobile PWA: Also setup persistent background checking
+                if (this.isMobile() && window.matchMedia('(display-mode: standalone)').matches) {
+                    this.setupMobilePWANotifications();
+                }
             }
         } else {
             console.warn('⚠️ Browser does not support notifications');
@@ -980,6 +1001,69 @@ class My2DoSimple {
                     this.markReminderSent(event.data.taskId);
                 }
             });
+        }
+    }
+
+    setupMobilePWANotifications() {
+        console.log('📱 Setting up mobile PWA-specific notification handling...');
+
+        // More aggressive checking on mobile PWAs (every 30 seconds)
+        if (this.notificationCheckInterval) {
+            clearInterval(this.notificationCheckInterval);
+        }
+
+        this.notificationCheckInterval = setInterval(() => {
+            this.checkReminders();
+        }, 30000); // 30 seconds for mobile PWA
+
+        // Additional mobile-specific event listeners
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                console.log('📱 PWA came to foreground - checking reminders...');
+                this.checkReminders();
+            }
+        });
+
+        // Also check when PWA gains focus
+        window.addEventListener('focus', () => {
+            console.log('📱 PWA gained focus - checking reminders...');
+            this.checkReminders();
+        });
+
+        // Force persistent Service Worker registration on mobile
+        if ('serviceWorker' in navigator) {
+            this.ensureServiceWorkerActive();
+        }
+
+        console.log('✅ Mobile PWA notification setup complete');
+    }
+
+    async ensureServiceWorkerActive() {
+        try {
+            const registration = await navigator.serviceWorker.getRegistration();
+            if (registration) {
+                console.log('📱 Service Worker registration found:', registration.active ? 'active' : 'not active');
+
+                // If SW is not active, try to activate it
+                if (!registration.active && registration.installing) {
+                    console.log('📱 Waiting for Service Worker to install...');
+                    await new Promise(resolve => {
+                        registration.installing.addEventListener('statechange', () => {
+                            if (registration.installing.state === 'activated') {
+                                resolve();
+                            }
+                        });
+                    });
+                }
+
+                // Send a ping to ensure SW is responsive
+                if (registration.active) {
+                    registration.active.postMessage({ type: 'PING' });
+                    console.log('📱 Pinged Service Worker to ensure it\'s responsive');
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error ensuring Service Worker active:', error);
         }
     }
 
@@ -1013,7 +1097,15 @@ class My2DoSimple {
             return;
         }
 
-        console.log('⏰ Checking for due reminders...');
+        const now = new Date();
+        const isMobilePWA = this.isMobile() && window.matchMedia('(display-mode: standalone)').matches;
+
+        console.log('⏰ Checking for due reminders...', {
+            timestamp: now.toLocaleString(),
+            isMobilePWA: isMobilePWA,
+            visibility: document.visibilityState,
+            notificationPermission: Notification.permission
+        });
 
         // Get all tasks with reminders
         const tasksWithReminders = this.data.todo.filter(task =>
@@ -1025,17 +1117,35 @@ class My2DoSimple {
             return;
         }
 
-        console.log(`📝 Found ${tasksWithReminders.length} tasks with reminders`);
+        console.log(`📝 Found ${tasksWithReminders.length} tasks with reminders:`);
+        tasksWithReminders.forEach(task => {
+            const reminderTime = new Date(task.reminderTime);
+            const timeDiff = reminderTime.getTime() - now.getTime();
+            console.log(`  - ${task.title}: reminder at ${reminderTime.toLocaleString()}, ${Math.round(timeDiff/1000/60)}min remaining`);
+        });
 
-        // Send to Service Worker for notification handling
+        // Mobile PWA: Always use fallback for more reliability
+        if (isMobilePWA) {
+            console.log('📱 Using fallback notifications for mobile PWA');
+            this.handleRemindersFallback(tasksWithReminders);
+            return;
+        }
+
+        // Desktop/Browser: Try Service Worker first
         if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
             navigator.serviceWorker.controller.postMessage({
                 type: 'CHECK_REMINDERS',
                 tasks: tasksWithReminders
             });
             console.log('📨 Sent reminders to Service Worker');
+
+            // Fallback timeout for mobile reliability
+            setTimeout(() => {
+                console.log('🔄 Fallback check after SW message...');
+                this.handleRemindersFallback(tasksWithReminders);
+            }, 5000);
         } else {
-            // Fallback: handle in main thread
+            console.log('🔄 Service Worker not available, using fallback');
             this.handleRemindersFallback(tasksWithReminders);
         }
     }
@@ -1087,6 +1197,74 @@ class My2DoSimple {
         } else {
             console.warn('⚠️ Task not found for marking reminder sent:', taskId);
         }
+    }
+
+    updateNotificationStatus() {
+        // Remove existing status if present
+        const existingStatus = document.getElementById('notification-status');
+        if (existingStatus) {
+            existingStatus.remove();
+        }
+
+        // Create status indicator
+        const statusDiv = document.createElement('div');
+        statusDiv.id = 'notification-status';
+        statusDiv.style.cssText = 'margin-top: 10px; padding: 8px; border-radius: 4px; font-size: 12px;';
+
+        const isMobilePWA = this.isMobile() && window.matchMedia('(display-mode: standalone)').matches;
+        const permission = 'Notification' in window ? Notification.permission : 'not-supported';
+        const isEnabled = this.data.settings.notificationsEnabled;
+
+        let statusText = '';
+        let statusClass = '';
+
+        if (!('Notification' in window)) {
+            statusText = '⚠️ Powiadomienia nie są obsługiwane w tej przeglądarce';
+            statusClass = 'warning';
+        } else if (permission === 'denied') {
+            statusText = '❌ Powiadomienia zostały zablokowane. Włącz je w ustawieniach przeglądarki.';
+            statusClass = 'error';
+        } else if (permission === 'default') {
+            statusText = '🔔 Kliknij checkbox powyżej, aby włączyć powiadomienia';
+            statusClass = 'info';
+        } else if (permission === 'granted' && isEnabled) {
+            if (isMobilePWA) {
+                statusText = '✅ Powiadomienia włączone (tryb mobilny PWA - 30s interwał)';
+                statusClass = 'success';
+            } else {
+                statusText = '✅ Powiadomienia włączone (60s interwał)';
+                statusClass = 'success';
+            }
+        } else if (permission === 'granted' && !isEnabled) {
+            statusText = '🔕 Powiadomienia dostępne, ale wyłączone w ustawieniach aplikacji';
+            statusClass = 'info';
+        }
+
+        // Apply styling based on status
+        switch (statusClass) {
+            case 'success':
+                statusDiv.style.backgroundColor = 'var(--success-color)';
+                statusDiv.style.color = 'white';
+                break;
+            case 'warning':
+                statusDiv.style.backgroundColor = 'var(--warning-color)';
+                statusDiv.style.color = 'white';
+                break;
+            case 'error':
+                statusDiv.style.backgroundColor = 'var(--error-color)';
+                statusDiv.style.color = 'white';
+                break;
+            case 'info':
+                statusDiv.style.backgroundColor = 'var(--primary-light)';
+                statusDiv.style.color = 'var(--primary-dark)';
+                break;
+        }
+
+        statusDiv.textContent = statusText;
+
+        // Insert after the notification setting
+        const notificationSetting = document.getElementById('enable-notifications').closest('.setting-item');
+        notificationSetting.parentNode.insertBefore(statusDiv, notificationSetting.nextSibling);
     }
 }
 
