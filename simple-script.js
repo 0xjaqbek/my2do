@@ -505,9 +505,9 @@ class My2DoSimple {
             ackButton.textContent = '🔔 Przyjmij powiadomienie';
             ackButton.className = 'btn-secondary';
             ackButton.style.cssText = 'margin-top: 8px; padding: 4px 8px; font-size: 11px; width: 100%;';
-            ackButton.onclick = (e) => {
+            ackButton.onclick = async (e) => {
                 e.stopPropagation(); // Prevent task details modal
-                this.acknowledgeNotification(task);
+                await this.acknowledgeNotification(task);
             };
             div.appendChild(ackButton);
         }
@@ -1189,11 +1189,11 @@ class My2DoSimple {
         }
     }
 
-    handleRemindersFallback(tasks) {
+    async handleRemindersFallback(tasks) {
         const now = new Date();
         console.log('🔄 Handling reminders in main thread (SW fallback)');
 
-        tasks.forEach(task => {
+        for (const task of tasks) {
             if (task.reminderTime && !task.reminderSent) {
                 const reminderTime = new Date(task.reminderTime);
                 const timeDiff = reminderTime.getTime() - now.getTime();
@@ -1204,24 +1204,19 @@ class My2DoSimple {
                 if (timeDiff <= 0 && timeDiff > -60000) {
                     console.log('🚨 Showing notification for task:', task.title);
 
-                    if ('Notification' in window && Notification.permission === 'granted') {
-                        const notification = new Notification(`Przypomnienie: ${task.title}`, {
-                            body: task.description || `Zaplanowane na: ${task.dueDate} ${task.dueTime}`,
-                            icon: './icons/icon-192x192.png',
-                            tag: `task-${task.id}`,
-                            requireInteraction: true
-                        });
+                    const title = `Przypomnienie: ${task.title}`;
+                    const body = task.description || `Zaplanowane na: ${task.dueDate} ${task.dueTime}`;
 
-                        notification.onclick = () => {
-                            window.focus();
-                            notification.close();
-                        };
-
+                    try {
+                        await this.showDirectNotification(title, body, `task-${task.id}`);
                         this.markReminderSent(task.id);
+                        console.log('✅ Fallback notification sent for:', task.title);
+                    } catch (error) {
+                        console.error('❌ Failed to show fallback notification:', error);
                     }
                 }
             }
-        });
+        }
     }
 
     markReminderSent(taskId) {
@@ -1348,19 +1343,59 @@ class My2DoSimple {
         }
     }
 
-    showDirectNotification(title, body) {
-        if ('Notification' in window && Notification.permission === 'granted') {
-            try {
+    async showDirectNotification(title, body, tag = 'direct-notification') {
+        if (!('Notification' in window) || Notification.permission !== 'granted') {
+            console.warn('⚠️ Cannot show notification - permission not granted');
+            alert('Powiadomienia nie są dostępne. Sprawdź uprawnienia w przeglądarce.');
+            return;
+        }
+
+        const isMobilePWA = this.isMobile() && window.matchMedia('(display-mode: standalone)').matches;
+
+        try {
+            if (isMobilePWA || 'serviceWorker' in navigator) {
+                // Use Service Worker registration for PWA/mobile
+                console.log('📱 Using ServiceWorkerRegistration.showNotification...');
+
+                const registration = await navigator.serviceWorker.getRegistration();
+                if (registration) {
+                    await registration.showNotification(title, {
+                        body: body,
+                        icon: './icons/icon-192x192.png',
+                        badge: './icons/icon-72x72.png',
+                        tag: tag,
+                        requireInteraction: true,
+                        vibrate: [200, 100, 200],
+                        timestamp: Date.now(),
+                        data: {
+                            source: 'direct',
+                            timestamp: Date.now()
+                        },
+                        actions: [
+                            {
+                                action: 'dismiss',
+                                title: '❌ Zamknij'
+                            }
+                        ]
+                    });
+
+                    console.log('✅ ServiceWorkerRegistration notification shown successfully');
+                } else {
+                    throw new Error('Service Worker registration not found');
+                }
+            } else {
+                // Desktop fallback - direct notification
+                console.log('🖥️ Using direct Notification constructor...');
+
                 const notification = new Notification(title, {
                     body: body,
                     icon: './icons/icon-192x192.png',
-                    tag: 'test-notification',
-                    requireInteraction: true,
-                    vibrate: [200, 100, 200]
+                    tag: tag,
+                    requireInteraction: true
                 });
 
                 notification.onclick = () => {
-                    console.log('📱 Test notification clicked');
+                    console.log('📱 Direct notification clicked');
                     window.focus();
                     notification.close();
                 };
@@ -1371,18 +1406,15 @@ class My2DoSimple {
                 setTimeout(() => {
                     notification.close();
                 }, 10000);
-
-            } catch (error) {
-                console.error('❌ Error showing direct notification:', error);
-                alert('Błąd powiadomienia: ' + error.message);
             }
-        } else {
-            console.warn('⚠️ Cannot show notification - permission not granted');
-            alert('Powiadomienia nie są dostępne. Sprawdź uprawnienia w przeglądarce.');
+
+        } catch (error) {
+            console.error('❌ Error showing notification:', error);
+            alert(`Błąd powiadomienia: ${error.message}\n\nSpróbuj w ustawieniach systemu włączyć powiadomienia dla tej aplikacji.`);
         }
     }
 
-    acknowledgeNotification(task) {
+    async acknowledgeNotification(task) {
         console.log('✅ User acknowledged notification for task:', task.title);
 
         // Show immediate test notification to verify it works
@@ -1390,7 +1422,7 @@ class My2DoSimple {
         const testBody = `Użytkownik potwierdził powiadomienie o godzinie ${new Date().toLocaleString()}`;
 
         // Force show notification immediately for testing
-        this.showDirectNotification(testTitle, testBody);
+        await this.showDirectNotification(testTitle, testBody, `ack-${task.id}`);
 
         // Mark as sent to prevent further reminders
         this.markReminderSent(task.id);
