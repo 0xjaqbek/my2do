@@ -49,6 +49,7 @@ class My2DoSimple {
 
     loadData() {
         try {
+            // First try to load new format
             const dataString = localStorage.getItem(this.storageKey);
             if (dataString) {
                 const loadedData = JSON.parse(dataString);
@@ -61,16 +62,89 @@ class My2DoSimple {
                     categories: loadedData.categories || this.data.categories
                 };
 
-                console.log('📖 Data loaded successfully:', {
+                console.log('📖 New format data loaded successfully:', {
                     todo: this.data.todo.length,
                     done: this.data.done.length
                 });
                 return true;
             }
+
+            // If no new format, try to migrate from old format
+            console.log('🔄 Attempting to migrate old data...');
+            if (this.migrateOldData()) {
+                console.log('✅ Old data migrated successfully');
+                return true;
+            }
+
         } catch (error) {
             console.error('❌ Error loading data:', error);
         }
         return false;
+    }
+
+    migrateOldData() {
+        try {
+            // Check for old localStorage format (my2do_tasks_list, etc.)
+            const oldTasksList = localStorage.getItem('my2do_tasks_list');
+            if (oldTasksList) {
+                const taskIds = JSON.parse(oldTasksList);
+                const migratedTasks = [];
+
+                for (const taskId of taskIds) {
+                    const taskData = localStorage.getItem(`my2do_tasks_${taskId}`);
+                    if (taskData) {
+                        const task = JSON.parse(taskData);
+                        if (task.completed) {
+                            this.data.done.push(task);
+                        } else {
+                            this.data.todo.push(task);
+                        }
+                        migratedTasks.push(task);
+                    }
+                }
+
+                console.log(`🔄 Migrated ${migratedTasks.length} tasks from old format`);
+
+                // Save in new format
+                this.saveData();
+
+                // Clean up old format (optional - commented out for safety)
+                // this.cleanupOldData();
+
+                return migratedTasks.length > 0;
+            }
+
+            // Check for even older IndexedDB fallback data
+            return this.checkForOldIndexedDBData();
+
+        } catch (error) {
+            console.error('❌ Error migrating old data:', error);
+            return false;
+        }
+    }
+
+    checkForOldIndexedDBData() {
+        // This would require more complex migration, for now just return false
+        // In the future, we could add migration from other storage formats
+        return false;
+    }
+
+    cleanupOldData() {
+        // Clean up old localStorage entries (call this manually if needed)
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('my2do_')) {
+                keysToRemove.push(key);
+            }
+        }
+
+        keysToRemove.forEach(key => {
+            localStorage.removeItem(key);
+            console.log(`🗑️ Removed old key: ${key}`);
+        });
+
+        console.log(`🧹 Cleaned up ${keysToRemove.length} old storage keys`);
     }
 
     downloadBackup() {
@@ -433,6 +507,8 @@ class My2DoSimple {
                 <button id="download-backup" class="btn-primary">Pobierz kopię zapasową</button>
                 <input type="file" id="import-backup" accept=".json" style="display: none;">
                 <button id="import-backup-btn" class="btn-secondary">Importuj kopię zapasową</button>
+                <button id="migrate-old-data" class="btn-secondary">Migruj stare dane</button>
+                <button id="cleanup-old-data" class="btn-secondary">Wyczyść stare dane</button>
             `;
             settingsContainer.appendChild(backupSection);
 
@@ -447,6 +523,22 @@ class My2DoSimple {
             document.getElementById('import-backup').addEventListener('change', (e) => {
                 if (e.target.files[0]) {
                     this.importBackup(e.target.files[0]);
+                }
+            });
+
+            document.getElementById('migrate-old-data').addEventListener('click', () => {
+                if (this.migrateOldData()) {
+                    alert('✅ Stare dane zostały zmigrowane!');
+                    this.renderAll();
+                } else {
+                    alert('ℹ️ Nie znaleziono starych danych do migracji');
+                }
+            });
+
+            document.getElementById('cleanup-old-data').addEventListener('click', () => {
+                if (confirm('⚠️ Czy na pewno chcesz usunąć stare dane z localStorage?\n\nUpewnij się, że nowe dane zostały już załadowane!')) {
+                    this.cleanupOldData();
+                    alert('✅ Stare dane zostały usunięte');
                 }
             });
         }
