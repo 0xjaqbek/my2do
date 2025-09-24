@@ -496,39 +496,85 @@ class My2DoApp {
     initSwipeNavigation() {
         const container = document.getElementById('views-container');
         let startX = 0;
+        let startY = 0;
         let currentX = 0;
+        let currentY = 0;
         let isDragging = false;
+        let isHorizontalSwipe = false;
+        let isVerticalScroll = false;
 
         container.addEventListener('touchstart', (e) => {
             startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            currentX = startX;
+            currentY = startY;
             isDragging = true;
+            isHorizontalSwipe = false;
+            isVerticalScroll = false;
         });
 
         container.addEventListener('touchmove', (e) => {
             if (!isDragging) return;
+
             currentX = e.touches[0].clientX;
-            e.preventDefault();
+            currentY = e.touches[0].clientY;
+
+            const diffX = currentX - startX;
+            const diffY = currentY - startY;
+
+            // Determine if this is horizontal swipe or vertical scroll
+            if (!isHorizontalSwipe && !isVerticalScroll) {
+                const absX = Math.abs(diffX);
+                const absY = Math.abs(diffY);
+
+                if (absX > absY && absX > 10) {
+                    // More horizontal movement - this is a swipe
+                    isHorizontalSwipe = true;
+                } else if (absY > absX && absY > 10) {
+                    // More vertical movement - this is a scroll
+                    isVerticalScroll = true;
+                }
+            }
+
+            // Only prevent default for horizontal swipes, allow vertical scrolling
+            if (isHorizontalSwipe) {
+                e.preventDefault();
+            }
         });
 
         container.addEventListener('touchend', () => {
             if (!isDragging) return;
-            isDragging = false;
 
-            const diffX = currentX - startX;
-            const threshold = 50;
+            // Only process swipe if it was determined to be horizontal
+            if (isHorizontalSwipe) {
+                const diffX = currentX - startX;
+                const threshold = 50;
 
-            if (Math.abs(diffX) > threshold) {
-                const views = ['notes', 'dashboard', 'completed', 'settings'];
-                const currentIndex = views.indexOf(this.currentView);
+                if (Math.abs(diffX) > threshold) {
+                    const views = ['notes', 'dashboard', 'completed', 'settings'];
+                    const currentIndex = views.indexOf(this.currentView);
 
-                if (diffX > 0 && currentIndex > 0) {
-                    // Swipe right - poprzedni widok
-                    this.switchView(views[currentIndex - 1]);
-                } else if (diffX < 0 && currentIndex < views.length - 1) {
-                    // Swipe left - następny widok
-                    this.switchView(views[currentIndex + 1]);
+                    if (diffX > 0 && currentIndex > 0) {
+                        // Swipe right - poprzedni widok
+                        this.switchView(views[currentIndex - 1]);
+                    } else if (diffX < 0 && currentIndex < views.length - 1) {
+                        // Swipe left - następny widok
+                        this.switchView(views[currentIndex + 1]);
+                    }
                 }
             }
+
+            // Reset all states
+            isDragging = false;
+            isHorizontalSwipe = false;
+            isVerticalScroll = false;
+        });
+
+        // Handle touch cancel (when user touches and then moves finger outside)
+        container.addEventListener('touchcancel', () => {
+            isDragging = false;
+            isHorizontalSwipe = false;
+            isVerticalScroll = false;
         });
     }
 
