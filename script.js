@@ -25,17 +25,46 @@ class My2DoApp {
     }
 
     async init() {
-        await this.initDB();
-        await this.loadSettings();
-        await this.loadCategories();
-        await this.loadTasks();
+        try {
+            console.log('🚀 Starting app initialization...');
 
-        this.initEventListeners();
-        this.initSpeechRecognition();
-        this.updateCategorySelect();
-        this.renderDashboard();
-        this.renderCompletedTasks();
-        this.renderSettings();
+            // Initialize database first
+            await this.initDB();
+            console.log('✅ Database initialized');
+
+            // Load all data in sequence
+            await this.loadSettings();
+            console.log('✅ Settings loaded');
+
+            await this.loadCategories();
+            console.log('✅ Categories loaded');
+
+            await this.loadTasks();
+            console.log('✅ Tasks loaded');
+
+            // Initialize UI components
+            this.initEventListeners();
+            this.initSpeechRecognition();
+            this.updateCategorySelect();
+
+            // Render UI only after all data is loaded
+            this.renderDashboard();
+            this.renderCompletedTasks();
+            this.renderSettings();
+
+            console.log('🎉 App initialization complete');
+        } catch (error) {
+            console.error('❌ App initialization failed:', error);
+            // Still try to render with empty data
+            this.tasks = [];
+            this.categories = this.getDefaultCategories();
+            this.renderDashboard();
+            this.renderCompletedTasks();
+            this.renderSettings();
+        } finally {
+            // Hide loading screen
+            this.hideLoadingScreen();
+        }
 
         // Rejestracja service workera
         if ('serviceWorker' in navigator) {
@@ -53,6 +82,69 @@ class My2DoApp {
         // Żądanie uprawnień do powiadomień
         if ('Notification' in window) {
             await this.requestNotificationPermission();
+        }
+
+        // Handle page visibility changes (mobile PWA lifecycle)
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                console.log('📱 App became visible - reloading data');
+                this.reloadDataOnFocus();
+            }
+        });
+
+        // Handle mobile app resume
+        window.addEventListener('pageshow', (event) => {
+            if (event.persisted) {
+                console.log('📱 Page restored from cache - reloading data');
+                this.reloadDataOnFocus();
+            }
+        });
+    }
+
+    getDefaultCategories() {
+        return [
+            { id: 'ogólne', name: 'Ogólne', color: '#2196F3' },
+            { id: 'praca', name: 'Praca', color: '#FF9800' },
+            { id: 'dom', name: 'Dom', color: '#4CAF50' },
+            { id: 'zakupy', name: 'Zakupy', color: '#9C27B0' }
+        ];
+    }
+
+    async reloadDataOnFocus() {
+        try {
+            console.log('🔄 Reloading data after app focus...');
+            this.showLoadingScreen();
+
+            await this.loadTasks();
+            await this.loadCategories();
+            await this.loadSettings();
+
+            this.updateCategorySelect();
+            this.renderDashboard();
+            this.renderCompletedTasks();
+            this.renderSettings();
+
+            console.log('✅ Data reloaded successfully');
+        } catch (error) {
+            console.error('❌ Error reloading data:', error);
+        } finally {
+            this.hideLoadingScreen();
+        }
+    }
+
+    showLoadingScreen() {
+        const loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen) {
+            loadingScreen.classList.remove('hidden');
+        }
+    }
+
+    hideLoadingScreen() {
+        const loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen) {
+            setTimeout(() => {
+                loadingScreen.classList.add('hidden');
+            }, 500); // Small delay to ensure data is rendered
         }
     }
 
@@ -197,11 +289,11 @@ class My2DoApp {
 
     saveToLocalStorage(storeName, data) {
         try {
-            const key = `${storeName}_${data.id || data.key}`;
+            const key = `my2do_${storeName}_${data.id || data.key}`;
             localStorage.setItem(key, JSON.stringify(data));
 
             // Also maintain a list of items for each store
-            const listKey = `${storeName}_list`;
+            const listKey = `my2do_${storeName}_list`;
             const existingList = JSON.parse(localStorage.getItem(listKey) || '[]');
             const itemId = data.id || data.key;
 
@@ -210,6 +302,7 @@ class My2DoApp {
                 localStorage.setItem(listKey, JSON.stringify(existingList));
             }
 
+            console.log(`💾 Saved to localStorage: ${key}`);
             return data;
         } catch (error) {
             console.error('localStorage error:', error);
@@ -247,20 +340,25 @@ class My2DoApp {
     getFromLocalStorage(storeName, key = null) {
         try {
             if (key) {
-                const item = localStorage.getItem(`${storeName}_${key}`);
-                return item ? JSON.parse(item) : null;
+                const item = localStorage.getItem(`my2do_${storeName}_${key}`);
+                const result = item ? JSON.parse(item) : null;
+                console.log(`📖 Read from localStorage: my2do_${storeName}_${key}`, result ? '✅' : '❌');
+                return result;
             } else {
-                const listKey = `${storeName}_list`;
+                const listKey = `my2do_${storeName}_list`;
                 const itemIds = JSON.parse(localStorage.getItem(listKey) || '[]');
                 const items = [];
 
+                console.log(`📖 Reading ${storeName} list from localStorage:`, itemIds);
+
                 for (const itemId of itemIds) {
-                    const item = localStorage.getItem(`${storeName}_${itemId}`);
+                    const item = localStorage.getItem(`my2do_${storeName}_${itemId}`);
                     if (item) {
                         items.push(JSON.parse(item));
                     }
                 }
 
+                console.log(`📖 Loaded ${items.length} items from localStorage for ${storeName}`);
                 return items;
             }
         } catch (error) {
@@ -292,14 +390,15 @@ class My2DoApp {
 
     deleteFromLocalStorage(storeName, key) {
         try {
-            localStorage.removeItem(`${storeName}_${key}`);
+            localStorage.removeItem(`my2do_${storeName}_${key}`);
 
             // Remove from list
-            const listKey = `${storeName}_list`;
+            const listKey = `my2do_${storeName}_list`;
             const existingList = JSON.parse(localStorage.getItem(listKey) || '[]');
             const updatedList = existingList.filter(id => id !== key);
             localStorage.setItem(listKey, JSON.stringify(updatedList));
 
+            console.log(`🗑️ Deleted from localStorage: my2do_${storeName}_${key}`);
             return true;
         } catch (error) {
             console.error('localStorage error:', error);
