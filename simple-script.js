@@ -29,28 +29,71 @@ class My2DoSimple {
     saveData() {
         try {
             const dataString = JSON.stringify(this.data, null, 2);
-            localStorage.setItem(this.storageKey, dataString);
-            console.log('💾 Data saved successfully');
 
-            // Auto-backup to downloadable file every 10 saves
+            // Multi-layer storage for mobile PWA reliability
+            localStorage.setItem(this.storageKey, dataString);
+            localStorage.setItem(`${this.storageKey}-backup`, dataString);
+            localStorage.setItem(`${this.storageKey}-timestamp`, Date.now().toString());
+
+            // Also save to sessionStorage as additional fallback
+            if (typeof sessionStorage !== 'undefined') {
+                sessionStorage.setItem(this.storageKey, dataString);
+            }
+
+            const debugInfo = {
+                todo: this.data.todo.length,
+                done: this.data.done.length,
+                timestamp: new Date().toLocaleString(),
+                isPWA: window.matchMedia('(display-mode: standalone)').matches,
+                userAgent: navigator.userAgent.substring(0, 50)
+            };
+
+            console.log('💾 Data saved successfully:', debugInfo);
+
+            // Auto-backup every 5 saves for mobile reliability
             const saveCount = parseInt(localStorage.getItem('saveCount') || '0') + 1;
             localStorage.setItem('saveCount', saveCount.toString());
 
-            if (saveCount % 10 === 0) {
-                this.downloadBackup();
+            if (saveCount % 5 === 0) {
+                console.log('📁 Creating auto-backup (save #' + saveCount + ')');
+                // Don't auto-download on mobile to avoid interrupting UX
+                if (!this.isMobile()) {
+                    this.downloadBackup();
+                }
             }
 
             return true;
         } catch (error) {
             console.error('❌ Error saving data:', error);
+            this.logStorageDebug();
             return false;
         }
     }
 
     loadData() {
         try {
-            // First try to load new format
-            const dataString = localStorage.getItem(this.storageKey);
+            console.log('📖 Starting data load process...', {
+                isPWA: window.matchMedia('(display-mode: standalone)').matches,
+                isMobile: this.isMobile(),
+                timestamp: new Date().toLocaleString()
+            });
+
+            // Multi-source loading for reliability
+            let dataString = localStorage.getItem(this.storageKey);
+            let source = 'primary';
+
+            // If primary fails, try backup
+            if (!dataString) {
+                dataString = localStorage.getItem(`${this.storageKey}-backup`);
+                source = 'backup';
+            }
+
+            // If localStorage fails, try sessionStorage
+            if (!dataString && typeof sessionStorage !== 'undefined') {
+                dataString = sessionStorage.getItem(this.storageKey);
+                source = 'session';
+            }
+
             if (dataString) {
                 const loadedData = JSON.parse(dataString);
 
@@ -62,15 +105,26 @@ class My2DoSimple {
                     categories: loadedData.categories || this.data.categories
                 };
 
-                console.log('📖 New format data loaded successfully:', {
+                const loadInfo = {
+                    source: source,
                     todo: this.data.todo.length,
-                    done: this.data.done.length
-                });
+                    done: this.data.done.length,
+                    lastSave: new Date(parseInt(localStorage.getItem(`${this.storageKey}-timestamp`) || '0')).toLocaleString()
+                };
+
+                console.log('✅ Data loaded successfully:', loadInfo);
+
+                // If loaded from backup/session, immediately save to primary
+                if (source !== 'primary') {
+                    console.log('🔄 Restoring from', source, 'to primary localStorage...');
+                    this.saveData();
+                }
+
                 return true;
             }
 
             // If no new format, try to migrate from old format
-            console.log('🔄 Attempting to migrate old data...');
+            console.log('🔄 No new format data found, attempting migration...');
             if (this.migrateOldData()) {
                 console.log('✅ Old data migrated successfully');
                 return true;
@@ -78,7 +132,10 @@ class My2DoSimple {
 
         } catch (error) {
             console.error('❌ Error loading data:', error);
+            this.logStorageDebug();
         }
+
+        console.log('ℹ️ No existing data found, starting fresh');
         return false;
     }
 
@@ -740,10 +797,142 @@ class My2DoSimple {
             this.recognition.start();
         }
     }
+
+    // === UTILITY METHODS ===
+    isMobile() {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    }
+
+    logStorageDebug() {
+        console.log('🔍 Storage Debug Info:', {
+            localStorage_available: typeof(Storage) !== "undefined",
+            localStorage_quota: this.getStorageQuota(),
+            current_keys: this.getStorageKeys(),
+            data_size: this.getDataSize(),
+            isPWA: window.matchMedia('(display-mode: standalone)').matches,
+            isMobile: this.isMobile(),
+            userAgent: navigator.userAgent
+        });
+    }
+
+    getStorageQuota() {
+        try {
+            if ('storage' in navigator && 'estimate' in navigator.storage) {
+                navigator.storage.estimate().then(estimate => {
+                    console.log('💾 Storage Estimate:', {
+                        quota: Math.round(estimate.quota / 1024 / 1024) + ' MB',
+                        usage: Math.round(estimate.usage / 1024) + ' KB'
+                    });
+                });
+            }
+            return 'Checking async...';
+        } catch (e) {
+            return 'Not available';
+        }
+    }
+
+    getStorageKeys() {
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.includes('my2do')) {
+                keys.push(key);
+            }
+        }
+        return keys;
+    }
+
+    getDataSize() {
+        try {
+            const dataString = localStorage.getItem(this.storageKey);
+            return dataString ? Math.round(dataString.length / 1024 * 100) / 100 + ' KB' : '0 KB';
+        } catch (e) {
+            return 'Error calculating';
+        }
+    }
 }
 
 // Initialize app
 let app;
 document.addEventListener('DOMContentLoaded', () => {
     app = new My2DoSimple();
+
+    // Add comprehensive PWA lifecycle handling for mobile data persistence
+    console.log('📱 Setting up PWA lifecycle handlers...');
+
+    // Save data before page unload (critical for mobile)
+    window.addEventListener('beforeunload', () => {
+        console.log('⚠️ Page unloading - force saving data...');
+        if (app) {
+            app.saveData();
+        }
+    });
+
+    // Save data when app goes to background (mobile PWA)
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            console.log('👁️ App going to background - saving data...');
+            if (app) {
+                app.saveData();
+            }
+        } else {
+            console.log('👁️ App coming to foreground - reloading data...');
+            if (app) {
+                // Reload data in case it was lost
+                app.loadData();
+                app.renderAll();
+            }
+        }
+    });
+
+    // Save data when PWA is paused/resumed (mobile specific)
+    window.addEventListener('pagehide', () => {
+        console.log('📱 PWA pausing - emergency save...');
+        if (app) {
+            app.saveData();
+        }
+    });
+
+    window.addEventListener('pageshow', (event) => {
+        console.log('📱 PWA resuming - checking data integrity...');
+        if (app && event.persisted) {
+            // Page was restored from bfcache, reload data
+            app.loadData();
+            app.renderAll();
+        }
+    });
+
+    // Handle focus/blur for desktop/mobile compatibility
+    window.addEventListener('focus', () => {
+        console.log('🎯 Window focused - verifying data...');
+        if (app) {
+            // Quick data verification on focus
+            const hasData = localStorage.getItem(app.storageKey);
+            if (!hasData && (app.data.todo.length > 0 || app.data.done.length > 0)) {
+                console.warn('⚠️ Data mismatch detected - emergency save...');
+                app.saveData();
+            }
+        }
+    });
+
+    // Periodic data backup for mobile reliability (every 30 seconds)
+    setInterval(() => {
+        if (app && (app.data.todo.length > 0 || app.data.done.length > 0)) {
+            console.log('🔄 Periodic backup check...');
+            const lastSave = localStorage.getItem(`${app.storageKey}-timestamp`);
+            const now = Date.now();
+            if (!lastSave || (now - parseInt(lastSave)) > 30000) {
+                console.log('💾 Performing periodic backup...');
+                app.saveData();
+            }
+        }
+    }, 30000);
+
+    // Log PWA installation state
+    console.log('📊 PWA Status:', {
+        isInstalled: window.matchMedia('(display-mode: standalone)').matches,
+        isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
+        hasServiceWorker: 'serviceWorker' in navigator,
+        storageAvailable: typeof(Storage) !== "undefined"
+    });
 });
