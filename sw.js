@@ -1,9 +1,9 @@
-const CACHE_NAME = 'my2do-v2.0';
+const CACHE_NAME = 'my2do-v3.0';
 const urlsToCache = [
   './',
   './index.html',
   './styles.css',
-  './script.js',
+  './simple-script.js',
   './manifest.json',
   './icons/icon-72x72.png',
   './icons/icon-96x96.png',
@@ -37,66 +37,83 @@ self.addEventListener('fetch', event => {
 
 // Obsługa powiadomień offline
 self.addEventListener('notificationclick', event => {
+  console.log('🔔 Notification clicked:', event.notification.tag);
   event.notification.close();
 
   event.waitUntil(
-    clients.openWindow('/')
+    clients.matchAll().then(clientList => {
+      // Try to focus existing window
+      for (let i = 0; i < clientList.length; i++) {
+        const client = clientList[i];
+        if (client.url.includes('my2do') && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      // If no existing window, open new one
+      if (clients.openWindow) {
+        return clients.openWindow('/my2do/');
+      }
+    })
   );
 });
 
-// Sprawdzanie i wysyłanie powiadomień
-self.addEventListener('sync', event => {
-  if (event.tag === 'check-reminders') {
-    event.waitUntil(checkAndSendReminders());
+// Listen for messages from main thread to check reminders
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'CHECK_REMINDERS') {
+    console.log('📨 Received CHECK_REMINDERS message');
+    checkAndSendReminders(event.data.tasks);
   }
 });
 
-async function checkAndSendReminders() {
-  const db = await openDB();
-  const tx = db.transaction(['tasks'], 'readonly');
-  const store = tx.objectStore('tasks');
-  const tasks = await store.getAll();
-
+function checkAndSendReminders(tasks) {
   const now = new Date();
+  console.log('⏰ Checking reminders at:', now.toLocaleString());
 
-  for (const task of tasks) {
-    if (task.reminder && !task.completed && !task.reminderSent) {
-      const reminderTime = new Date(task.reminder);
+  tasks.forEach(task => {
+    if (task.reminderTime && !task.completed && !task.reminderSent) {
+      const reminderTime = new Date(task.reminderTime);
+      const timeDiff = reminderTime.getTime() - now.getTime();
 
-      if (now >= reminderTime) {
-        await self.registration.showNotification(`Przypomnienie: ${task.title}`, {
-          body: task.description || 'Czas na wykonanie zadania',
-          icon: '/icons/icon-192x192.png',
-          badge: '/icons/icon-72x72.png',
+      console.log(`📝 Task: ${task.title}, Reminder: ${reminderTime.toLocaleString()}, Time diff: ${timeDiff}ms`);
+
+      // Show notification if reminder time has passed (within 1 minute tolerance)
+      if (timeDiff <= 0 && timeDiff > -60000) {
+        console.log('🚨 Showing notification for task:', task.title);
+
+        self.registration.showNotification(`Przypomnienie: ${task.title}`, {
+          body: task.description || `Zaplanowane na: ${task.dueDate} ${task.dueTime}`,
+          icon: './icons/icon-192x192.png',
+          badge: './icons/icon-72x72.png',
           tag: `task-${task.id}`,
           data: { taskId: task.id },
           requireInteraction: true,
           actions: [
             {
               action: 'complete',
-              title: 'Oznacz jako wykonane'
+              title: '✅ Oznacz jako wykonane'
             },
             {
               action: 'snooze',
-              title: 'Przypomnij za 10 min'
+              title: '⏰ Przypomnij za 10 min'
             }
-          ]
+          ],
+          vibrate: [200, 100, 200],
+          timestamp: now.getTime()
+        }).then(() => {
+          console.log('✅ Notification shown successfully');
+          // Send message back to mark as sent
+          self.clients.matchAll().then(clients => {
+            clients.forEach(client => {
+              client.postMessage({
+                type: 'REMINDER_SENT',
+                taskId: task.id
+              });
+            });
+          });
+        }).catch(error => {
+          console.error('❌ Failed to show notification:', error);
         });
-
-        // Oznacz przypomnienie jako wysłane
-        const writeTx = db.transaction(['tasks'], 'readwrite');
-        const writeStore = writeTx.objectStore('tasks');
-        task.reminderSent = true;
-        await writeStore.put(task);
       }
     }
-  }
-}
-
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open('My2DoDatabase', 1);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
   });
 }

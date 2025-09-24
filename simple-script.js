@@ -21,6 +21,7 @@ class My2DoSimple {
         this.recognition = null;
         this.isRecording = false;
         this.currentView = 'notes';
+        this.notificationCheckInterval = null;
 
         this.init();
     }
@@ -317,6 +318,9 @@ class My2DoSimple {
         this.renderAll();
         this.applySettings();
 
+        // Setup notifications
+        await this.setupNotifications();
+
         // Service worker
         if ('serviceWorker' in navigator) {
             try {
@@ -349,13 +353,23 @@ class My2DoSimple {
             recurring: taskData.recurring || false,
             recurringType: taskData.recurringType || '',
             subtasks: taskData.subtasks || [],
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            reminderSent: false
         };
 
         // Set reminder time if needed
         if (task.dueDate && task.dueTime && task.reminderOffset > 0) {
             const dueDateTime = new Date(`${task.dueDate}T${task.dueTime}`);
             task.reminderTime = new Date(dueDateTime.getTime() - (task.reminderOffset * 60000)).toISOString();
+
+            console.log('⏰ Task created with reminder:', {
+                title: task.title,
+                dueDate: task.dueDate,
+                dueTime: task.dueTime,
+                reminderOffset: task.reminderOffset,
+                reminderTime: new Date(task.reminderTime).toLocaleString(),
+                timeUntilReminder: Math.round((new Date(task.reminderTime).getTime() - Date.now()) / 1000 / 60) + ' minutes'
+            });
         }
 
         this.data.todo.push(task);
@@ -588,8 +602,27 @@ class My2DoSimple {
             document.getElementById('font-size-value').textContent = e.target.value + 'px';
         });
 
-        document.getElementById('enable-notifications').addEventListener('change', (e) => {
+        document.getElementById('enable-notifications').addEventListener('change', async (e) => {
             this.saveSetting('notificationsEnabled', e.target.checked);
+
+            if (e.target.checked) {
+                // Request permission and start checking
+                if ('Notification' in window) {
+                    const permission = await Notification.requestPermission();
+                    if (permission === 'granted') {
+                        this.startNotificationChecking();
+                        console.log('✅ Notifications enabled and checking started');
+                    } else {
+                        console.warn('⚠️ Notification permission denied');
+                        e.target.checked = false;
+                        this.saveSetting('notificationsEnabled', false);
+                    }
+                }
+            } else {
+                // Stop checking
+                this.stopNotificationChecking();
+                console.log('🔕 Notifications disabled and checking stopped');
+            }
         });
 
         // Categories
@@ -920,6 +953,139 @@ class My2DoSimple {
             return dataString ? Math.round(dataString.length / 1024 * 100) / 100 + ' KB' : '0 KB';
         } catch (e) {
             return 'Error calculating';
+        }
+    }
+
+    // === NOTIFICATION SYSTEM ===
+    async setupNotifications() {
+        console.log('🔔 Setting up notification system...');
+
+        // Request notification permissions
+        if ('Notification' in window) {
+            const permission = await Notification.requestPermission();
+            console.log('📱 Notification permission:', permission);
+
+            if (permission === 'granted') {
+                this.startNotificationChecking();
+            }
+        } else {
+            console.warn('⚠️ Browser does not support notifications');
+        }
+
+        // Listen for messages from Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', (event) => {
+                if (event.data && event.data.type === 'REMINDER_SENT') {
+                    console.log('📨 Received REMINDER_SENT for task:', event.data.taskId);
+                    this.markReminderSent(event.data.taskId);
+                }
+            });
+        }
+    }
+
+    startNotificationChecking() {
+        // Clear any existing interval
+        if (this.notificationCheckInterval) {
+            clearInterval(this.notificationCheckInterval);
+        }
+
+        // Check reminders every minute
+        this.notificationCheckInterval = setInterval(() => {
+            this.checkReminders();
+        }, 60000); // 60 seconds
+
+        // Initial check
+        this.checkReminders();
+        console.log('⏰ Notification checking started (60s intervals)');
+    }
+
+    stopNotificationChecking() {
+        if (this.notificationCheckInterval) {
+            clearInterval(this.notificationCheckInterval);
+            this.notificationCheckInterval = null;
+            console.log('🛑 Notification checking stopped');
+        }
+    }
+
+    checkReminders() {
+        if (!this.data.settings.notificationsEnabled) {
+            console.log('🔕 Notifications disabled in settings');
+            return;
+        }
+
+        console.log('⏰ Checking for due reminders...');
+
+        // Get all tasks with reminders
+        const tasksWithReminders = this.data.todo.filter(task =>
+            task.reminderTime && !task.reminderSent
+        );
+
+        if (tasksWithReminders.length === 0) {
+            console.log('📝 No pending reminders');
+            return;
+        }
+
+        console.log(`📝 Found ${tasksWithReminders.length} tasks with reminders`);
+
+        // Send to Service Worker for notification handling
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({
+                type: 'CHECK_REMINDERS',
+                tasks: tasksWithReminders
+            });
+            console.log('📨 Sent reminders to Service Worker');
+        } else {
+            // Fallback: handle in main thread
+            this.handleRemindersFallback(tasksWithReminders);
+        }
+    }
+
+    handleRemindersFallback(tasks) {
+        const now = new Date();
+        console.log('🔄 Handling reminders in main thread (SW fallback)');
+
+        tasks.forEach(task => {
+            if (task.reminderTime && !task.reminderSent) {
+                const reminderTime = new Date(task.reminderTime);
+                const timeDiff = reminderTime.getTime() - now.getTime();
+
+                console.log(`📝 Task: ${task.title}, Reminder: ${reminderTime.toLocaleString()}, Time diff: ${timeDiff}ms`);
+
+                // Show notification if reminder time has passed
+                if (timeDiff <= 0 && timeDiff > -60000) {
+                    console.log('🚨 Showing notification for task:', task.title);
+
+                    if ('Notification' in window && Notification.permission === 'granted') {
+                        const notification = new Notification(`Przypomnienie: ${task.title}`, {
+                            body: task.description || `Zaplanowane na: ${task.dueDate} ${task.dueTime}`,
+                            icon: './icons/icon-192x192.png',
+                            tag: `task-${task.id}`,
+                            requireInteraction: true
+                        });
+
+                        notification.onclick = () => {
+                            window.focus();
+                            notification.close();
+                        };
+
+                        this.markReminderSent(task.id);
+                    }
+                }
+            }
+        });
+    }
+
+    markReminderSent(taskId) {
+        console.log('✅ Marking reminder as sent for task:', taskId);
+
+        // Find and update the task
+        const taskIndex = this.data.todo.findIndex(task => task.id === taskId);
+        if (taskIndex !== -1) {
+            this.data.todo[taskIndex].reminderSent = true;
+            this.saveData();
+            console.log('💾 Reminder marked as sent and saved');
+        } else {
+            console.warn('⚠️ Task not found for marking reminder sent:', taskId);
         }
     }
 }
